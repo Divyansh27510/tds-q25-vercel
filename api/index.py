@@ -1,17 +1,32 @@
-from fastapi import FastAPI, Response
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Response, Request
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 import json
 
 app = FastAPI()
 
-# CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+# --------------------------------------------------
+# FORCE CORS HEADERS ON EVERY RESPONSE
+# --------------------------------------------------
+
+@app.middleware("http")
+async def force_cors(request: Request, call_next):
+    if request.method == "OPTIONS":
+        response = PlainTextResponse("OK", status_code=200)
+    else:
+        response = await call_next(request)
+
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+
+    return response
+
+
+# --------------------------------------------------
+# TELEMETRY DATA
+# --------------------------------------------------
 
 DATA = json.loads(r'''
 [
@@ -56,10 +71,19 @@ DATA = json.loads(r'''
 ]
 ''')
 
+
+# --------------------------------------------------
+# REQUEST MODEL
+# --------------------------------------------------
+
 class AnalyticsRequest(BaseModel):
     regions: list[str]
     threshold_ms: float
 
+
+# --------------------------------------------------
+# 95th PERCENTILE
+# --------------------------------------------------
 
 def percentile_95(values: list[float]) -> float:
     values = sorted(values)
@@ -77,19 +101,25 @@ def percentile_95(values: list[float]) -> float:
     ) * fraction
 
 
+# --------------------------------------------------
+# API ENDPOINT
+# --------------------------------------------------
+
 @app.post("/")
 def analytics(
     request: AnalyticsRequest,
     response: Response
 ):
-    # Explicit CORS header for evaluator
+    # Explicit CORS header on successful POST response
     response.headers["Access-Control-Allow-Origin"] = "*"
 
     result = []
 
     for region in request.regions:
+
         rows = [
-            item for item in DATA
+            item
+            for item in DATA
             if item["region"] == region
         ]
 
